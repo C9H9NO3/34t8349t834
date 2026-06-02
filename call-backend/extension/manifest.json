@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "GV Call Audio Capture",
+  "version": "1.0",
+  "description": "Captures the Google Voice call tab audio and streams it to the local backend for transcription.",
+  "permissions": ["tabCapture", "offscreen"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Capture this tab's call audio" }
+}

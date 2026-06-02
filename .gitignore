@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output (the Docker build runs `vite build` itself)
+outbound-ui/dist/
+
+# Backend runtime state + secrets (never commit logged-in sessions or keys)
+call-backend/profiles/
+call-backend/.gv-profile/
+call-backend/.env
+call-backend/accounts.json
+call-backend/call-history.json
+call-backend/settings.json
+call-backend/callui-*.json
+call-backend/audio/*.mp3
+
+# Python helpers (unrelated scraping scripts)
+__pycache__/
+*.pyc
+
+# Editor / OS
+.cursor/
+.vscode/
+*.log
+.DS_Store
+Thumbs.db

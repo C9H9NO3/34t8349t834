@@ -1,0 +1,9 @@
+node_modules/
+.env
+.gv-profile/
+profiles/
+accounts.json
+call-history.json
+settings.json
+callui-*.json
+audio/*.mp3

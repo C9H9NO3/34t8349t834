@@ -1,0 +1,20 @@
+{
+  "name": "call-backend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Local backend that drives Google Voice via Playwright, injects MP3 audio, and live-transcribes calls.",
+  "scripts": {
+    "start": "node server.js",
+    "login": "node login.js",
+    "devices": "node devices.js",
+    "gen-audio": "node gen_test_audio.js",
+    "test:proxy": "node scripts/test-proxy-browser.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "http-proxy-middleware": "^2.0.9",
+    "playwright": "^1.47.0",
+    "ws": "^8.18.0"
+  }
+}

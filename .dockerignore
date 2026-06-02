@@ -1,0 +1,13 @@
+**/node_modules
+**/.git
+**/.gitignore
+call-backend/profiles
+call-backend/.gv-profile
+call-backend/accounts.json
+call-backend/call-history.json
+call-backend/settings.json
+call-backend/callui-*.json
+call-backend/.env
+outbound-ui/dist
+**/*.log
+.cursor
