@@ -31,6 +31,7 @@ export function useBackend() {
   // True when the backend runs on the live server (login is local-only; the
   // Accounts tab shows "Import session" instead of the headed login flow).
   const [hosted, setHosted] = useState(false);
+  const [persistence, setPersistence] = useState(null);
   const [proxyEnabled, setProxyEnabled] = useState(false);
   const [accounts, setAccounts] = useState([]);
   const [activeId, setActiveId] = useState(null);
@@ -116,6 +117,7 @@ export function useBackend() {
           if (typeof msg.stt === "boolean") setSttEnabled(msg.stt);
           if (typeof msg.headless === "boolean") setHeadless(msg.headless);
           if (typeof msg.hosted === "boolean") setHosted(msg.hosted);
+          if (msg.persistence && typeof msg.persistence === "object") setPersistence(msg.persistence);
           if (typeof msg.proxyEnabled === "boolean") setProxyEnabled(msg.proxyEnabled);
           if (Array.isArray(msg.accounts)) setAccounts(msg.accounts);
           if ("activeId" in msg) setActiveId(msg.activeId);
@@ -326,6 +328,7 @@ export function useBackend() {
     sttEnabled,
     headless,
     hosted,
+    persistence,
     httpBase: HTTP_BASE,
     proxyEnabled,
     accounts,

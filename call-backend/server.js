@@ -14,7 +14,7 @@ import path from "node:path";
 import fs from "node:fs";
 import express from "express";
 import { WebSocketServer } from "ws";
-import { config } from "./config.js";
+import { config, persistenceInfo } from "./config.js";
 import {
   authEnabled,
   checkPassword,
@@ -353,6 +353,7 @@ const handlers = {
       stt: Boolean(config.openaiApiKey),
       headless: gv.isHeadless(),
       hosted: Boolean(config.hosted),
+      persistence: persistenceInfo(),
       proxyEnabled: Boolean(config.proxy && config.proxy.enabled),
       telegram: telegramConfigured(),
       telegramChatId: maskChatId(config.telegram.chatId),
@@ -1343,15 +1344,21 @@ server.listen(config.port, config.host, async () => {
   console.log(`  mode: ${config.hosted ? "HOSTED (login local-only; import sessions)" : "LOCAL (headed login + export)"}`);
   console.log(`  auth: ${authEnabled() ? "ON" : "OFF (no password)"}`);
   console.log(`  proxy: ${pst.ok ? `ON (${proxyMode()})` : `OFF — ${pst.reason}`}`);
-  // Persistence signal: state lives under DATA_DIR (/data on the host). If this
-  // count resets to 0 after a restart on the host, no Railway Volume is mounted
-  // at /data and uploads will not survive - mount one to persist.
+  // Persistence signal: state lives under DATA_DIR (/data on the host) and only
+  // survives restarts when a Railway Volume is mounted there. persistenceInfo()
+  // checks /proc/mounts + a marker file so we can state this definitively.
   const persisted = accounts.list().length;
+  const pinfo = persistenceInfo();
   console.log(`  state dir: ${config.profilesDir}`);
-  console.log(
-    `  persisted accounts on boot: ${persisted}` +
-      (config.hosted ? "  (if this resets to 0 after a restart, mount a Railway Volume at /data)" : "")
-  );
+  console.log(`  persistent storage: ${pinfo.persistent ? "yes" : "NO"} (dataDir ${pinfo.dataDir}, accounts on boot ${persisted})`);
+  if (config.hosted && !pinfo.persistent) {
+    console.warn("  ============================================================");
+    console.warn("  WARNING: /data is NOT a mounted Volume.");
+    console.warn("  Imported Google Voice sessions WILL BE LOST on every restart.");
+    console.warn("  Fix: Railway -> your service -> Volumes -> add a Volume with");
+    console.warn("       mount path EXACTLY /data, redeploy, then re-import once.");
+    console.warn("  ============================================================");
+  }
 
   // Do not auto-open a visible browser on boot. Sessions open lazily when an
   // action needs them (Open browser / dial / flow / campaign), so nothing pops

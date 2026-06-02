@@ -257,6 +257,15 @@ export default function AccountsPanel({ be }) {
         <button className="btn btn-ghost" onClick={() => be.send("status")}>Refresh</button>
       </div>
 
+      {hosted && be.persistence && be.persistence.persistent === false && (
+        <div className="persistence-warn" role="alert">
+          <strong>Storage is not persistent.</strong> Imported sessions and call
+          history will be lost on every restart. Fix in Railway: open this
+          service, go to <em>Volumes</em>, add a Volume with mount path exactly{" "}
+          <code>/data</code>, redeploy, then re-import your sessions once.
+        </div>
+      )}
+
       {/* Account cards */}
       <div className="entity-grid">
         {be.accounts.map((a) => {

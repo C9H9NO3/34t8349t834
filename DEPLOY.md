@@ -18,9 +18,20 @@ log in to Google accounts on a **local** backend, export the saved session as a
 ## One-time setup
 1. Create a Railway project from this repo (Railway auto-detects `railway.json` /
    `Dockerfile`).
-2. Add a **Volume** and mount it at `/data` (the image sets `DATA_DIR=/data`).
+2. **Add a Volume mounted at exactly `/data` (required for persistence).**
+   Without this, `/data` is part of the ephemeral container layer and every
+   redeploy/restart wipes your imported sessions. Steps in Railway:
+   - Open your service -> **Volumes** (or the service's **Settings -> Volumes**).
+   - Click **New Volume** / **Add Volume**.
+   - Set the **Mount path** to exactly `/data` (the image sets `DATA_DIR=/data`).
+   - Save and let it redeploy.
    This holds `profiles/`, `accounts.json`, `call-history.json`, `settings.json`
    so uploaded sessions and history survive redeploys.
+
+   To confirm it worked: the **Accounts** tab shows a red "Storage is not
+   persistent" banner until a Volume is mounted at `/data`. The boot logs also
+   print `persistent storage: yes/NO`. Once it says `yes`, re-import your
+   sessions one final time and they'll stick across restarts.
 3. Set service **Variables**:
 
    | Variable | Required | Notes |
@@ -59,6 +70,17 @@ Log in locally, then upload — the server never opens a browser for login.
 ## Running calls
 - Campaigns run the imported accounts in parallel (each is a full headless
   Chromium) through their assigned residential IPs.
+
+## Troubleshooting
+- **`Account "…" is signed out on the server — re-import a fresh session`**: the
+  uploaded session's Google cookies are no longer valid on the server (Google
+  often invalidates a session when it first appears from a new IP/fingerprint).
+  The calls page falls back to the public marketing page, so there's no dialer.
+  Fix: locally log that account in again, **Export session**, then **Import
+  session** on the server. Use the per-card **Screenshot** button to see exactly
+  what the headless browser is showing.
+- **Imports disappear after a restart**: no Volume is mounted at `/data` (see
+  one-time setup step 2). The Accounts tab banner / boot logs tell you.
 
 ## Caveats
 - Automating Google Voice from a datacenter (even via residential proxy) can

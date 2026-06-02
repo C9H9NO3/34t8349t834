@@ -768,6 +768,23 @@ textarea:focus {
   background: rgba(255, 92, 92, 0.12);
 }
 
+/* Persistence warning banner (hosted, no Volume) */
+.persistence-warn {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 92, 92, 0.5);
+  background: rgba(255, 92, 92, 0.12);
+  color: #ffd0d0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.persistence-warn code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
 /* Stats */
 .stats {
   display: flex;

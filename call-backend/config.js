@@ -96,6 +96,9 @@ export const config = {
   // from Railway's injected env when HOSTED is unset.
   hosted: HOSTED,
 
+  // Root folder for all persistent state. On the host this is /data, which only
+  // survives restarts when a Railway Volume is mounted there (see persistenceInfo).
+  dataDir: DATA_DIR,
   // Base folder holding one persistent Chromium profile per saved Google account
   // (cookies/state live here). Keep this out of git / on a volume when hosted.
   profilesDir: path.join(DATA_DIR, "profiles"),
@@ -372,6 +375,62 @@ export const config = {
     chatId: process.env.TELEGRAM_CHAT_ID || "",
   },
 };
+
+// Reports whether DATA_DIR is backed by durable storage that survives restarts.
+//  - Writable: can we create files at all?
+//  - Mounted: on Linux, is DATA_DIR (or an ancestor that isn't "/") a real mount
+//    point per /proc/mounts? A Railway Volume shows up as a mount; the bare
+//    ephemeral container layer does not.
+//  - Marker: a /data/.persistence file stores the first time we ever booted here;
+//    if it predates this process, the volume genuinely persisted across a restart.
+// `persistent` is the bottom line shown to the user. Locally (not hosted) we treat
+// the backend folder as persistent (it always is on a desktop).
+export function persistenceInfo() {
+  const dir = config.dataDir;
+  const info = { dataDir: dir, hosted: Boolean(config.hosted), writable: false, mounted: false, persistent: false, firstBootAt: null };
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const probe = path.join(dir, ".persistence-write-test");
+    fs.writeFileSync(probe, "ok");
+    fs.rmSync(probe, { force: true });
+    info.writable = true;
+  } catch {
+    info.writable = false;
+  }
+
+  if (process.platform === "linux") {
+    try {
+      const mounts = fs.readFileSync("/proc/mounts", "utf8");
+      const points = new Set(
+        mounts.split("\n").map((l) => l.split(" ")[1]).filter(Boolean)
+      );
+      const resolved = path.resolve(dir);
+      info.mounted = [...points].some(
+        (mp) => mp !== "/" && (mp === resolved || resolved.startsWith(mp.replace(/\/?$/, "/")))
+      );
+    } catch {
+      info.mounted = false;
+    }
+  }
+
+  // First-boot marker (also gives us a persisted-across-restart confirmation).
+  try {
+    const marker = path.join(dir, ".persistence");
+    if (fs.existsSync(marker)) {
+      const data = JSON.parse(fs.readFileSync(marker, "utf8"));
+      info.firstBootAt = data.firstBootAt || null;
+    } else if (info.writable) {
+      info.firstBootAt = new Date().toISOString();
+      fs.writeFileSync(marker, JSON.stringify({ firstBootAt: info.firstBootAt }, null, 2));
+    }
+  } catch {
+    /* ignore marker errors */
+  }
+
+  // Not hosted => desktop, always durable. Hosted => durable only on a real mount.
+  info.persistent = info.writable && (!config.hosted || info.mounted);
+  return info;
+}
 
 export function greetingPath() {
   return path.join(config.audioDir, config.greetingFile);

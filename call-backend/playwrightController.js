@@ -153,15 +153,14 @@ class Session {
 
   async gotoVoice({ reload = false } = {}) {
     const page = this.page;
-    if (page.url().includes("voice.google.com") && !reload) return;
-    if (page.url().includes("voice.google.com") && reload) {
-      this.step("Reloading Google Voice so capture hooks apply…");
-      await tolerateVoiceNavigation(page, () =>
-        page.reload({ waitUntil: "domcontentloaded", timeout: 60000 })
-      );
-      return;
-    }
-    this.step("Opening Google Voice…");
+    const onCanonical = page.url().startsWith(config.googleVoiceUrl);
+    // Already parked on the exact calls URL and no refresh asked for: nothing to do.
+    if (onCanonical && !reload) return;
+    // Always hard-navigate to the canonical /u/0/calls URL (never page.reload()):
+    // a plain reload would keep a drifted URL (/about, /u/1/…, or the signed-out
+    // marketing page), whereas a fresh goto guarantees we land on the dialer
+    // route and re-applies the inject/capture init scripts.
+    this.step(reload ? "Reloading Google Voice (canonical /u/0/calls)…" : "Opening Google Voice…");
     await tolerateVoiceNavigation(page, () =>
       page.goto(config.googleVoiceUrl, { waitUntil: "domcontentloaded", timeout: 60000 })
     );
@@ -193,12 +192,40 @@ class Session {
       }
       if (!this.page) return false;
     }
-    const url = this.page.url();
+    let url = this.page.url();
     if (url.includes("accounts.google.com")) return false;
     if (!url.includes("voice.google.com")) {
       await this.gotoVoice().catch(() => {});
+      url = this.page.url();
     }
-    return !this.page.url().includes("accounts.google.com");
+    if (url.includes("accounts.google.com")) return false;
+    // A signed-out session does NOT redirect to accounts.google.com - Google
+    // serves the public marketing page at voice.google.com/u/0/calls itself.
+    // So URL checks alone wrongly report "logged in". Probe the DOM: the logged-in
+    // app has the dialer/app shell; the marketing page has "Get started"/"Sign in"
+    // CTAs and the /about route. Default to logged-in only when the app shell shows.
+    try {
+      const signedOut = await this.page.evaluate(() => {
+        const href = location.href;
+        if (/voice\.google\.com\/about/i.test(href)) return true;
+        // The real GV app shell: the dialer input or its container.
+        const hasApp = !!document.querySelector(
+          'input[placeholder="Enter a name or number"], [gv-test-id], gv-app, gv-content-pane, [aria-label="Call panel" i]'
+        );
+        if (hasApp) return false;
+        // Marketing/sign-in markers (the signed-out landing page).
+        const txt = (document.body && document.body.innerText ? document.body.innerText : "").toLowerCase();
+        const marketing =
+          /\bget started\b/.test(txt) ||
+          /professional-grade phone plan/.test(txt) ||
+          (/\bsign in\b/.test(txt) && /google workspace/.test(txt));
+        return marketing;
+      });
+      return !signedOut;
+    } catch {
+      // If the probe failed (page navigating), fall back to the URL signal.
+      return !this.page.url().includes("accounts.google.com");
+    }
   }
 
   async dismissSoundBanner() {
@@ -219,6 +246,20 @@ class Session {
     await this.gotoVoice({ reload: true });
     await this.dismissSoundBanner();
 
+    // Fail fast with a clear, actionable message if this session is signed out.
+    // Otherwise the dialer never renders and the user only sees a cryptic 10s
+    // "waiting for input… to be visible" timeout. Auto-capture a screenshot so
+    // the signed-out state is one click to confirm in the Accounts tab.
+    if (!(await this.isLoggedIn())) {
+      const shotNote = await this.saveDebugShot("signed-out").catch(() => null);
+      const acctLabel = (accounts.get(this.id) || {}).label || this.label;
+      throw new Error(
+        `Account "${acctLabel}" is signed out on the server — re-import a fresh session ` +
+          `(export it locally, then use Import session in the Accounts tab).` +
+          (shotNote ? ` [debug shot: ${shotNote}]` : "")
+      );
+    }
+
     try {
       const loc = page.locator(config.selectors.newCallButton).first();
       await loc.waitFor({ state: "visible", timeout: 1500 });
@@ -229,7 +270,16 @@ class Session {
     }
 
     const input = page.locator(config.selectors.numberInput).first();
-    await input.waitFor({ state: "visible", timeout: 10000 });
+    try {
+      await input.waitFor({ state: "visible", timeout: 10000 });
+    } catch (err) {
+      const shotNote = await this.saveDebugShot("no-dialer").catch(() => null);
+      throw new Error(
+        `dial failed: number input not found (the calls page never rendered the dialer).` +
+          (shotNote ? ` [debug shot: ${shotNote}]` : "") +
+          ` — original: ${err.message}`
+      );
+    }
     this.step(`found number input: ${config.selectors.numberInput}`);
     await input.click();
     await input.fill("");
@@ -509,6 +559,19 @@ class Session {
       if (!this.page) throw new Error("no page to capture");
     }
     return this.page.screenshot({ type: "png", fullPage: false });
+  }
+
+  // Writes a PNG of the current page to disk for post-mortem debugging (e.g. a
+  // dial that failed because the session was signed out). Returns the filename,
+  // or throws if capture is impossible. Best-effort: callers ignore failures.
+  async saveDebugShot(tag = "debug") {
+    const buf = await this.screenshot();
+    const safeTag = String(tag).replace(/[^a-z0-9_-]/gi, "");
+    const name = `shot-${this.label}-${safeTag}-${Date.now()}.png`;
+    const outPath = path.join(HERE, name);
+    fs.writeFileSync(outPath, buf);
+    this.step(`saved debug screenshot: ${name} (url: ${this.page.url()})`);
+    return name;
   }
 
   async close() {
