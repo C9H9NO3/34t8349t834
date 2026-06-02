@@ -41,6 +41,15 @@ export function profileDir(id) {
   return path.join(config.profilesDir, id);
 }
 
+// Portable login state (decrypted cookies + localStorage) captured on the local
+// machine and injected on the server. Stored as a SIBLING of the Chromium
+// profile dir (not inside it) so Chromium never touches it. This is how a login
+// survives the Windows->Linux move: raw Cookies DBs are OS-encrypted and can't
+// cross machines, but storageState values can be re-encrypted natively.
+export function storageStatePath(id) {
+  return path.join(config.profilesDir, `${id}.storagestate.json`);
+}
+
 // Public view of an account (no internal paths).
 function publicView(a) {
   return {
@@ -213,9 +222,10 @@ export function remove(id) {
   reg.accounts.splice(idx, 1);
   if (reg.activeId === id) reg.activeId = reg.accounts[0]?.id || null;
   writeRegistry(reg);
-  // Best-effort delete of the profile directory.
+  // Best-effort delete of the profile directory + portable state sidecar.
   try {
     fs.rmSync(profileDir(id), { recursive: true, force: true });
+    fs.rmSync(storageStatePath(id), { force: true });
   } catch {
     /* ignore */
   }

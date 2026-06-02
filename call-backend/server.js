@@ -68,9 +68,21 @@ app.post("/auth", (req, res) => {
 app.get("/api/session/:id/export", requireAuth, async (req, res) => {
   const id = req.params.id;
   try {
-    // Release Windows file locks (Chromium keeps the SQLite stores open).
+    // Capture the PORTABLE login (decrypted cookies + localStorage) from the
+    // running local context FIRST - this is what survives the move to the
+    // Linux server (the raw Cookies DB is OS-encrypted and won't). Then close
+    // to release Windows file locks (Chromium keeps the SQLite stores open).
+    let state = null;
+    try {
+      state = await gv.exportStorageState(id);
+    } catch (err) {
+      log(`Export warning: could not read login state for "${(accounts.get(id) || {}).label || id}" (${err.message}). The zip may not stay logged in - log in locally first.`);
+    }
     await gv.closeAccount(id).catch(() => {});
-    const buf = sessionBundle.buildSingle(id);
+    if (state && (!Array.isArray(state.cookies) || state.cookies.length === 0)) {
+      log(`Export warning: no cookies captured for "${(accounts.get(id) || {}).label || id}" - this account may not be logged in locally.`);
+    }
+    const buf = sessionBundle.buildSingle(id, state);
     const acct = accounts.get(id);
     const safe = ((acct && acct.label) || id).replace(/[^a-z0-9._-]+/gi, "_").slice(0, 40);
     res.setHeader("Content-Type", "application/zip");
@@ -85,8 +97,17 @@ app.get("/api/session/:id/export", requireAuth, async (req, res) => {
 // All accounts -> one .zip ("export all" so a full set moves in one round-trip).
 app.get("/api/session/export-all", requireAuth, async (req, res) => {
   try {
-    for (const a of accounts.list()) await gv.closeAccount(a.id).catch(() => {});
-    const buf = sessionBundle.buildAll();
+    // Capture each account's portable login before closing its context.
+    const states = {};
+    for (const a of accounts.list()) {
+      try {
+        states[a.id] = await gv.exportStorageState(a.id);
+      } catch (err) {
+        log(`Export-all warning: no login state for "${a.label || a.id}" (${err.message}).`);
+      }
+      await gv.closeAccount(a.id).catch(() => {});
+    }
+    const buf = sessionBundle.buildAll(states);
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", `attachment; filename="gv-sessions-all.zip"`);
     res.send(buf);

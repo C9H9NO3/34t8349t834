@@ -649,6 +649,62 @@ export async function openAccount(id, { headed = false } = {}) {
   }
 }
 
+// Re-applies a portable login snapshot to a freshly launched context. Reads the
+// sidecar written at import time (accounts.storageStatePath). Cookies are added
+// directly (storageState shape == addCookies shape); localStorage is seeded via
+// an init script that only fills keys not already present so it never clobbers
+// values the live app writes. All best-effort: a missing/partial state must
+// never block launch.
+async function applyStorageState(session, context, id) {
+  let state;
+  try {
+    const p = accounts.storageStatePath(id);
+    if (!fs.existsSync(p)) return;
+    state = JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch (err) {
+    session.step(`portable login: could not read state (${err.message})`);
+    return;
+  }
+  if (!state || typeof state !== "object") return;
+
+  const cookies = Array.isArray(state.cookies) ? state.cookies : [];
+  if (cookies.length) {
+    try {
+      await context.addCookies(cookies);
+      session.step(`portable login: applied ${cookies.length} cookies`);
+    } catch (err) {
+      session.step(`portable login: addCookies failed (${err.message})`);
+    }
+  }
+
+  const origins = Array.isArray(state.origins) ? state.origins : [];
+  if (origins.length) {
+    try {
+      await context.addInitScript((originsArg) => {
+        try {
+          const here = location.origin;
+          const match = originsArg.find((o) => o && o.origin === here);
+          if (!match || !Array.isArray(match.localStorage)) return;
+          for (const kv of match.localStorage) {
+            if (!kv || kv.name == null) continue;
+            try {
+              if (window.localStorage.getItem(kv.name) == null) {
+                window.localStorage.setItem(kv.name, kv.value);
+              }
+            } catch {
+              /* quota / blocked - ignore */
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+      }, origins);
+    } catch (err) {
+      session.step(`portable login: localStorage seed skipped (${err.message})`);
+    }
+  }
+}
+
 async function openAccountImpl(id, { headed = false } = {}) {
   const existing = sessions.get(id);
   if (existing && existing.alive()) {
@@ -742,6 +798,13 @@ async function openAccountImpl(id, { headed = false } = {}) {
   } catch {
     /* best-effort */
   }
+  // Inject the portable login (decrypted cookies + localStorage) BEFORE any GV
+  // navigation. This is what makes a Windows->Linux session transfer work: the
+  // raw Cookies DB in the copied profile is OS-encrypted and useless across
+  // machines, so we instead re-apply the cookies here and Chromium re-encrypts
+  // them with this host's key. Idempotent: a fresh re-import refreshes auth.
+  await applyStorageState(session, context, id);
+
   session.page = await freshPage(context);
   sessions.set(id, session);
   foregroundId = id;
@@ -811,6 +874,15 @@ export async function isLoggedIn(id) {
   const s = sessions.get(id);
   if (!s) return false;
   return s.isLoggedIn();
+}
+
+// Captures a PORTABLE login snapshot (decrypted cookies + localStorage) from the
+// running local context. Must run where the profile was created (Windows/Chrome)
+// so the OS can decrypt the cookies; the resulting JSON is re-encrypted natively
+// on whatever OS imports it. Opens the account if it isn't already live.
+export async function exportStorageState(id) {
+  const session = await openAccount(id);
+  return session.context.storageState();
 }
 
 // Opens (if needed) the account's headless session and returns a PNG Buffer of
