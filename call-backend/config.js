@@ -71,6 +71,12 @@ const DATA_DIR = process.env.DATA_DIR || HERE;
 const DATA_AUDIO_DIR = path.join(DATA_DIR, "audio");
 const AUDIO_DIR = fs.existsSync(DATA_AUDIO_DIR) ? DATA_AUDIO_DIR : path.join(HERE, "audio");
 
+// True when running on the live server (Railway). Drives both "import session"
+// mode and the default browser headlessness (a hosted box has no X display).
+const HOSTED =
+  String(process.env.HOSTED ?? (process.env.RAILWAY_ENVIRONMENT ? "true" : "false"))
+    .toLowerCase() === "true";
+
 export const config = {
   // Control/dashboard server. Binds 0.0.0.0 so it works inside a container;
   // override with HOST/PORT (Railway injects PORT). Access is gated by
@@ -86,9 +92,7 @@ export const config = {
   // on a hosted backend the dashboard shows "Import session" (upload) instead of
   // the headed login flow. Set HOSTED=true (the Dockerfile does); also inferred
   // from Railway's injected env when HOSTED is unset.
-  hosted:
-    String(process.env.HOSTED ?? (process.env.RAILWAY_ENVIRONMENT ? "true" : "false"))
-      .toLowerCase() === "true",
+  hosted: HOSTED,
 
   // Base folder holding one persistent Chromium profile per saved Google account
   // (cookies/state live here). Keep this out of git / on a volume when hosted.
@@ -117,8 +121,10 @@ export const config = {
   // the absolute path here, or set to null to fall back to the OS default device.
   mpvPath: "mpv",
 
-  // Browser behavior.
-  headless: false, // Google login is unreliable headless; keep visible.
+  // Browser behavior. Headed locally (Google login needs a visible window for
+  // the Export flow); headless on a hosted box (no X display). Override either
+  // way with HEADLESS=true/false.
+  headless: String(process.env.HEADLESS ?? (HOSTED ? "true" : "false")).toLowerCase() === "true",
   // Auto-grant microphone permission so getUserMedia never prompts, plus
   // anti-detection flags so Google doesn't reject the login as an unsafe browser.
   browserArgs: [

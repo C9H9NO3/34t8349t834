@@ -84,8 +84,10 @@ function launchOptions(dir, { useChannel, proxy, headed }) {
   }
   const opts = {
     // `headed` forces a visible window (manual login / Open browser) regardless
-    // of the runtime headless toggle.
-    headless: headed ? false : isHeadless(),
+    // of the runtime headless toggle. On a hosted server there is no X display,
+    // so headless is hard-forced - no path (campaign, toggle, showBrowser) can
+    // ever try to open a window and crash with "Missing X server".
+    headless: config.hosted ? true : headed ? false : isHeadless(),
     viewport: s.viewport || null,
     args,
     ignoreDefaultArgs: config.ignoreDefaultArgs || [],
