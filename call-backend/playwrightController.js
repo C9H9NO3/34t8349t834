@@ -500,6 +500,17 @@ class Session {
     return { file: outPath, count: elements.length, url: page.url() };
   }
 
+  // Captures a PNG of the current page (what this headless session sees right
+  // now). Useful for debugging on a display-less host: shows whether GV loaded,
+  // a login/consent screen appeared, the dialer is present, etc.
+  async screenshot() {
+    if (!this.alive()) {
+      this.page = await freshPage(this.context).catch(() => null);
+      if (!this.page) throw new Error("no page to capture");
+    }
+    return this.page.screenshot({ type: "png", fullPage: false });
+  }
+
   async close() {
     if (this.context) {
       await this.context.close().catch(() => {});
@@ -737,6 +748,23 @@ export async function isLoggedIn(id) {
   const s = sessions.get(id);
   if (!s) return false;
   return s.isLoggedIn();
+}
+
+// Opens (if needed) the account's headless session and returns a PNG Buffer of
+// its current page. Also reports the URL + login state so the caller can show
+// "not logged in" context alongside the image.
+export async function screenshot(id) {
+  const session = await openAccount(id);
+  const buf = await session.screenshot();
+  let url = "";
+  let loggedIn = false;
+  try {
+    url = session.page.url();
+    loggedIn = !url.includes("accounts.google.com");
+  } catch {
+    /* ignore */
+  }
+  return { buf, url, loggedIn };
 }
 
 // Opens / brings the logged-in browser to the front so the user can inspect it.

@@ -96,6 +96,23 @@ app.get("/api/session/export-all", requireAuth, async (req, res) => {
   }
 });
 
+// Live PNG of what the account's (headless) browser is currently showing -
+// the debug tool for "why didn't the dialer appear" (login screen? consent?).
+app.get("/api/session/:id/screenshot", requireAuth, async (req, res) => {
+  const id = req.params.id;
+  try {
+    const { buf, url, loggedIn } = await gv.screenshot(id);
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Page-Url", encodeURIComponent(url || ""));
+    res.setHeader("X-Logged-In", loggedIn ? "1" : "0");
+    res.send(buf);
+    log(`Captured ${(accounts.get(id)?.label) || id} screen — ${loggedIn ? "logged in" : "NOT logged in"} (${url}).`);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Upload a bundle (raw zip body) -> restore account(s) + profile(s) on this host.
 app.post(
   "/api/session/import",

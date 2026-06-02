@@ -120,6 +120,9 @@ export default function AccountsPanel({ be }) {
   const [busy, setBusy] = useState({}); // id -> transient label ("Checking...", etc.)
   const [importMsg, setImportMsg] = useState("");
   const [importing, setImporting] = useState(false);
+  const [shotId, setShotId] = useState(null); // account whose screenshot modal is open
+  const [shotKey, setShotKey] = useState(0); // cache-bust / refresh key
+  const [shotLoading, setShotLoading] = useState(false);
   const fileRef = useRef(null);
   const prevIds = useRef(new Set(be.accounts.map((a) => a.id)));
 
@@ -328,6 +331,13 @@ export default function AccountsPanel({ be }) {
                 >
                   {busy[a.id] === "Rotating..." ? "Rotating..." : "Rotate IP"}
                 </button>
+                <button
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => { setShotId(a.id); setShotKey(Date.now()); setShotLoading(true); }}
+                  title="Capture what this account's headless browser is currently showing"
+                >
+                  Screenshot
+                </button>
 
                 {!hosted && (
                   <>
@@ -406,6 +416,33 @@ export default function AccountsPanel({ be }) {
           onAdd={(payload) => be.send("addAccount", payload)}
           onClose={() => setAdding(false)}
         />
+      )}
+
+      {shotId && (
+        <Modal
+          title="Browser screenshot"
+          subtitle="What this account's headless browser is showing right now. If it shows a Google sign-in page instead of Google Voice, the session needs re-login (export a fresh one locally)."
+          onClose={() => setShotId(null)}
+        >
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+            <button
+              className="btn btn-sm"
+              onClick={() => { setShotLoading(true); setShotKey(Date.now()); }}
+            >
+              Refresh
+            </button>
+            {shotLoading && <span className="muted">Capturing… (opening the browser can take a few seconds)</span>}
+          </div>
+          <img
+            key={shotKey}
+            className="shot-frame"
+            src={`${be.httpBase}/api/session/${shotId}/screenshot?t=${shotKey}`}
+            alt="account browser screenshot"
+            onLoad={() => setShotLoading(false)}
+            onError={() => setShotLoading(false)}
+            style={{ width: "100%", borderRadius: 8, border: "1px solid #2a2f3a", display: "block" }}
+          />
+        </Modal>
       )}
     </div>
   );
