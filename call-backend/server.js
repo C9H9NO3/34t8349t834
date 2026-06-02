@@ -1324,8 +1324,17 @@ server.listen(config.port, config.host, async () => {
   console.log(`  dashboard: ${fs.existsSync(config.distDir) ? "served at /" : "not bundled (dev: run the Vite UI)"}`);
   console.log(`  control WS: /control   audio WS: /audio`);
   console.log(`  mode: ${config.hosted ? "HOSTED (login local-only; import sessions)" : "LOCAL (headed login + export)"}`);
-  console.log(`  auth: ${authEnabled() ? "ON (DASHBOARD_PASSWORD set)" : "OFF (no DASHBOARD_PASSWORD)"}`);
+  console.log(`  auth: ${authEnabled() ? "ON" : "OFF (no password)"}`);
   console.log(`  proxy: ${pst.ok ? `ON (${proxyMode()})` : `OFF — ${pst.reason}`}`);
+  // Persistence signal: state lives under DATA_DIR (/data on the host). If this
+  // count resets to 0 after a restart on the host, no Railway Volume is mounted
+  // at /data and uploads will not survive - mount one to persist.
+  const persisted = accounts.list().length;
+  console.log(`  state dir: ${config.profilesDir}`);
+  console.log(
+    `  persisted accounts on boot: ${persisted}` +
+      (config.hosted ? "  (if this resets to 0 after a restart, mount a Railway Volume at /data)" : "")
+  );
 
   // Do not auto-open a visible browser on boot. Sessions open lazily when an
   // action needs them (Open browser / dial / flow / campaign), so nothing pops

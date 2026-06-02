@@ -83,9 +83,11 @@ export const config = {
   // DASHBOARD_PASSWORD when set (see server.js auth).
   host: process.env.HOST || "0.0.0.0",
   port: process.env.PORT ? Number(process.env.PORT) : 8787,
-  // Shared password protecting the dashboard + WS + remote-login proxy. When
-  // empty, auth is DISABLED (convenient for local dev).
-  dashboardPassword: process.env.DASHBOARD_PASSWORD || "",
+  // Shared password protecting the dashboard + control WS. On the hosted site
+  // it defaults to "123lmao" so the gate is always on (override with
+  // DASHBOARD_PASSWORD for something stronger). Locally it stays empty = auth
+  // DISABLED, so the desktop Export flow needs no password.
+  dashboardPassword: process.env.DASHBOARD_PASSWORD || (HOSTED ? "123lmao" : ""),
   // Built dashboard served by the backend (single-service hosting).
   distDir: path.join(HERE, "public"),
   // True when running on the live server (Railway). Google login is local-only;
