@@ -2,32 +2,40 @@
 // source `via`) to a single canonical outcome category used end-to-end:
 // persisted in callHistory, broadcast to the UI, and used for re-run skipping.
 //
-// Canonical categories:
-//   pressed_1       - callback via DTMF key 1
-//   callback_voice  - spoken callback
-//   call_screened   - screening detected (automated or human gatekeeper)
-//   uncallable      - wrong/disconnected/dial-failed number
-//   picked_up       - answered, greeting played, no callback/keypress
-//   no_callback     - answered, explicitly declined a callback
-//   hung_up_early   - answered then hung up before a conclusion
-//   no_answer       - rang with no pickup / transient error
-//   declined        - instant decline (rejected immediately) / declined twice
+// Canonical categories (the 5-bucket model):
+//   schedule_callback - pressed 1 OR spoken denial ("this wasn't me"). The
+//                       press-1-vs-voice distinction is kept in `via` for
+//                       analytics, NOT as a separate category.
+//   pickup_silent     - answered but no callback: silence, unrelated speech,
+//                       "yes that was me / it's fine", or hung up after answer.
+//   auto_decline      - rang then dropped before answer (instant decline);
+//                       campaign retries once (DND), then concludes here.
+//   no_answer         - rang out to timeout with no pickup (re-callable).
+//   uncallable        - disconnected/invalid number, dial failure, OR call
+//                       screening ("state your name"). Hang up, never re-call.
 
-export function canonicalCategory(category, reason, via = null) {
+export function canonicalCategory(category, reason, _via = null) {
   const r = String(reason || "");
-  if (r === "callback") return via === "dtmf" ? "pressed_1" : "callback_voice";
-  if (r === "no_callback") return "no_callback";
-  if (r === "no_response") return "picked_up";
-  if (r === "hung_up") return "hung_up_early";
-  if (r === "call_screening") return "call_screened";
-  if (r === "wrong_number" || r === "dial_failed") return "uncallable";
-  if (r === "instant_decline" || r === "declined_twice") return "declined";
-  if (r === "no_answer") return "no_answer";
-  if (r.startsWith("error")) return "no_answer"; // transient -> re-callable
 
-  // Fallback by category bucket if the reason is unrecognized.
-  if (category === "picked_up") return "picked_up";
+  // Callback confirmed (key 1 or voice) -> one bucket; `via` carries the detail.
+  if (r === "callback") return "schedule_callback";
+
+  // Answered but no callback scheduled.
+  if (r === "no_callback" || r === "no_response" || r === "hung_up") return "pickup_silent";
+
+  // Carrier intercept / screening / dialer failure -> not callable.
+  if (r === "call_screening" || r === "wrong_number" || r === "dial_failed") return "uncallable";
+
+  // Instant decline (and the campaign's post-retry conclusion).
+  if (r === "instant_decline" || r === "declined_twice") return "auto_decline";
+
+  // Rang out, or a transient error we can safely retry later.
+  if (r === "no_answer") return "no_answer";
+  if (r.startsWith("error")) return "no_answer";
+
+  // Fallback by internal category bucket if the reason is unrecognized.
+  if (category === "picked_up") return "pickup_silent";
   if (category === "uncallable") return "uncallable";
-  if (category === "declined") return "declined";
+  if (category === "declined") return "auto_decline";
   return "no_answer";
 }

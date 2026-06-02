@@ -9,9 +9,15 @@
 // phones are on Do-Not-Disturb and drop the first ring).
 
 import { digits } from "./util.js";
+import { canonicalCategory } from "./outcomes.js";
 
-// Final, user-facing categories.
+// Internal runFlow categories that are terminal (vs "declined" which retries
+// once, and "cancelled" which requeues). Tallying/marking uses the CANONICAL
+// category derived from (category, reason, via) so progress matches callHistory.
 const FINAL = new Set(["uncallable", "no_pickup", "picked_up"]);
+
+// The 5 canonical buckets surfaced to the UI (plus live queued/calling).
+const CANON = ["schedule_callback", "pickup_silent", "auto_decline", "no_answer", "uncallable"];
 
 export class CampaignManager {
   constructor({ declineRetries = 1, onLead, onProgress, log } = {}) {
@@ -36,10 +42,13 @@ export class CampaignManager {
   }
 
   counts() {
-    const c = { uncallable: 0, no_pickup: 0, picked_up: 0, queued: 0, calling: 0 };
+    const c = { queued: 0, calling: 0 };
+    for (const k of CANON) c[k] = 0;
     for (const l of this.queue) {
-      if (l.status === "done") c[l.category] = (c[l.category] || 0) + 1;
-      else if (l.status === "calling") c.calling++;
+      if (l.status === "done") {
+        const canon = canonicalCategory(l.category, l.reason, l.via);
+        c[canon] = (c[canon] || 0) + 1;
+      } else if (l.status === "calling") c.calling++;
       else c.queued++;
     }
     return c;
@@ -47,7 +56,7 @@ export class CampaignManager {
 
   progress() {
     const counts = this.counts();
-    const done = counts.uncallable + counts.no_pickup + counts.picked_up;
+    const done = CANON.reduce((sum, k) => sum + (counts[k] || 0), 0);
     return {
       running: this.running,
       total: this.queue.length,

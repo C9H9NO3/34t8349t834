@@ -392,9 +392,17 @@ class Session {
     return false;
   }
 
-  // Classifies a dialed call's early outcome:
-  //   "answered" | "ended" (instant decline) | "timeout" (no pickup) |
-  //   "failed" (UI never appeared) | "cancelled" (aborted via signal)
+  // Classifies a dialed call's early outcome. This is the system that decides
+  // instant-decline (DND) vs no-answer vs answered:
+  //   "answered" - a call-duration timer appeared/incremented => callee picked up
+  //   "ended"    - the call WAS ringing (panel active) then went idle BEFORE any
+  //                timer => instant decline / dropped before answer (retry once)
+  //   "timeout"  - rang the full window with no pickup and no instant drop
+  //   "failed"   - the call UI never became active at all (dialer issue)
+  //   "cancelled"- flow aborted via signal
+  // The firstTimer===null guard is what separates an instant decline ("ended")
+  // from an answered-then-hung-up call: once a timer is seen we return
+  // "answered" and the post-answer hangup is handled by runFlow's hangup watch.
   async waitForAnswerOrEnd(timeoutMs, signal = null) {
     const deadline = Date.now() + timeoutMs;
     let firstTimer = null;
@@ -422,7 +430,7 @@ class Session {
       const ringing = panel.found ? panel.active : await this.isRinging().catch(() => false);
       if (ringing) sawRinging = true;
       else if (sawRinging && firstTimer === null) {
-        this.step("call ended before answer (declined/dropped)");
+        this.step("instant decline: call was ringing then dropped before answer");
         return "ended";
       } else if (
         everFoundPanel &&
@@ -435,6 +443,7 @@ class Session {
       }
       await this.page.waitForTimeout(200);
     }
+    this.step(firstTimer === null ? "no answer (rang out, no pickup)" : "no answer (timer seen but never confirmed)");
     return "timeout";
   }
 

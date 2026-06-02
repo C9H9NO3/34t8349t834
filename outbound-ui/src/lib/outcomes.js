@@ -4,27 +4,19 @@
 // when re-running a batch (defaultRecall=false => skipped by default).
 
 export const CATEGORY_META = {
-  pressed_1: { label: "Pressed 1", cls: "mk-pressed", defaultRecall: false },
-  callback_voice: { label: "Callback (voice)", cls: "mk-callback", defaultRecall: false },
-  call_screened: { label: "Call screened", cls: "mk-screened", defaultRecall: false },
-  uncallable: { label: "Uncallable", cls: "mk-uncallable", defaultRecall: false },
-  picked_up: { label: "Picked up - no key", cls: "mk-pickedup", defaultRecall: true },
-  no_callback: { label: "Said no", cls: "mk-nocallback", defaultRecall: true },
-  hung_up_early: { label: "Hung up early", cls: "mk-hungup", defaultRecall: true },
+  schedule_callback: { label: "Schedule callback", cls: "mk-callback", defaultRecall: false },
+  pickup_silent: { label: "Pickup silent", cls: "mk-pickedup", defaultRecall: true },
+  auto_decline: { label: "Auto-decline", cls: "mk-declined", defaultRecall: true },
   no_answer: { label: "No answer", cls: "mk-nopickup", defaultRecall: true },
-  declined: { label: "Declined", cls: "mk-declined", defaultRecall: true },
+  uncallable: { label: "Uncallable", cls: "mk-uncallable", defaultRecall: false },
 };
 
 // Ordered list of categories for pickers / summaries.
 export const CATEGORY_ORDER = [
-  "pressed_1",
-  "callback_voice",
-  "picked_up",
-  "no_callback",
-  "hung_up_early",
+  "schedule_callback",
+  "pickup_silent",
+  "auto_decline",
   "no_answer",
-  "declined",
-  "call_screened",
   "uncallable",
 ];
 
@@ -70,7 +62,15 @@ export function leadMark(ls) {
   }
   if (ls.status === "done") {
     const meta = CATEGORY_META[ls.category];
-    if (meta) return { label: meta.label, cls: meta.cls, reason: ls.reason };
+    if (meta) {
+      // For a scheduled callback, surface HOW it was confirmed (analytics:
+      // pressed 1 vs spoken) as the chip detail while keeping one category.
+      let reason = ls.reason;
+      if (ls.category === "schedule_callback") {
+        reason = ls.via === "dtmf" ? "pressed 1" : ls.via === "voice" ? "voice" : ls.reason;
+      }
+      return { label: meta.label, cls: meta.cls, reason };
+    }
   }
   return null;
 }

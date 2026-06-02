@@ -178,8 +178,10 @@ export default function TestingPanel({ be }) {
             <span className="pill">{camp.running ? "Running" : "Idle"}</span>
             <span className="pill">Done <b>{camp.done || 0}</b>/{camp.total || 0}</span>
             <span className="pill">In flight <b>{camp.inFlight || 0}</b></span>
-            <span className="pill mk-pickedup">Picked up <b>{counts.picked_up || 0}</b></span>
-            <span className="pill mk-nopickup">No pickup <b>{counts.no_pickup || 0}</b></span>
+            <span className="pill mk-callback">Schedule callback <b>{counts.schedule_callback || 0}</b></span>
+            <span className="pill mk-pickedup">Pickup silent <b>{counts.pickup_silent || 0}</b></span>
+            <span className="pill mk-declined">Auto-decline <b>{counts.auto_decline || 0}</b></span>
+            <span className="pill mk-nopickup">No answer <b>{counts.no_answer || 0}</b></span>
             <span className="pill mk-uncallable">Uncallable <b>{counts.uncallable || 0}</b></span>
           </div>
         </div>
