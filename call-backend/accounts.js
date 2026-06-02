@@ -83,6 +83,46 @@ export function get(id) {
   return a ? publicView(a) : null;
 }
 
+// Returns the raw stored account object (incl. proxy region/city/sid) for
+// bundling/export. Clones it so callers can't mutate the registry. Null if
+// unknown.
+export function raw(id) {
+  const a = readRegistry().accounts.find((x) => x.id === id);
+  return a ? JSON.parse(JSON.stringify(a)) : null;
+}
+
+// Raw view of every account (for "export all").
+export function rawAll() {
+  return readRegistry().accounts.map((a) => JSON.parse(JSON.stringify(a)));
+}
+
+// Upserts an imported account by id (keeps its proxy/sid so the egress IP pool
+// matches the session it was logged in under). Backfills missing defaults and
+// ensures its profile directory exists. Returns the public view.
+export function importAccount(rawAccount) {
+  if (!rawAccount || typeof rawAccount !== "object" || !rawAccount.id) {
+    throw new Error("invalid account in bundle");
+  }
+  const reg = readRegistry();
+  const incoming = {
+    id: rawAccount.id,
+    label: (rawAccount.label || "").trim() || rawAccount.phoneNumber || "Account",
+    phoneNumber: (rawAccount.phoneNumber || "").trim(),
+    note: (rawAccount.note || "").trim(),
+    createdAt: rawAccount.createdAt || new Date().toISOString(),
+    lastUsedAt: rawAccount.lastUsedAt || null,
+    proxy: rawAccount.proxy || defaultProxy(),
+    stats: { ...EMPTY_STATS, ...(rawAccount.stats || {}) },
+  };
+  const idx = reg.accounts.findIndex((x) => x.id === incoming.id);
+  if (idx === -1) reg.accounts.push(incoming);
+  else reg.accounts[idx] = incoming;
+  if (!reg.activeId) reg.activeId = incoming.id;
+  writeRegistry(reg);
+  fs.mkdirSync(profileDir(incoming.id), { recursive: true });
+  return publicView(incoming);
+}
+
 // Returns the raw proxy assignment for an account (assigning + persisting one
 // if missing), so the controller can route Chromium through it.
 export function getProxy(id) {

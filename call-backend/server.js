@@ -14,7 +14,6 @@ import path from "node:path";
 import fs from "node:fs";
 import express from "express";
 import { WebSocketServer } from "ws";
-import { createProxyMiddleware } from "http-proxy-middleware";
 import { config } from "./config.js";
 import {
   authEnabled,
@@ -35,6 +34,7 @@ import { CampaignManager } from "./campaign.js";
 import * as callHistory from "./callHistory.js";
 import { canonicalCategory } from "./outcomes.js";
 import * as settings from "./settings.js";
+import * as sessionBundle from "./sessionBundle.js";
 
 // Apply persisted runtime settings (e.g. Telegram creds) over .env defaults.
 settings.load();
@@ -60,19 +60,64 @@ app.post("/auth", (req, res) => {
   res.status(401).json({ ok: false, error: "wrong password" });
 });
 
-// Reverse-proxy the local noVNC/websockify so the remote Google login is
-// reachable (and authenticated) through the single public port.
-const vncProxy = createProxyMiddleware({
-  target: config.vncProxyTarget,
-  changeOrigin: true,
-  ws: true,
-  pathRewrite: { "^/vnc": "" },
-  logLevel: "warn",
+// ---- Session bundles: log in locally, move the saved session to the server.
+// Export downloads a zip (account record + Chromium profile, caches stripped);
+// import restores it on the (headless) host. Both require auth when enabled.
+
+// One account -> .zip download.
+app.get("/api/session/:id/export", requireAuth, async (req, res) => {
+  const id = req.params.id;
+  try {
+    // Release Windows file locks (Chromium keeps the SQLite stores open).
+    await gv.closeAccount(id).catch(() => {});
+    const buf = sessionBundle.buildSingle(id);
+    const acct = accounts.get(id);
+    const safe = ((acct && acct.label) || id).replace(/[^a-z0-9._-]+/gi, "_").slice(0, 40);
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="gv-${safe}-${id.slice(0, 8)}.zip"`);
+    res.send(buf);
+    log(`Exported session "${(acct && acct.label) || id}" (${(buf.length / 1048576).toFixed(1)} MB).`);
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
 });
-app.use("/vnc", requireAuth, vncProxy);
+
+// All accounts -> one .zip ("export all" so a full set moves in one round-trip).
+app.get("/api/session/export-all", requireAuth, async (req, res) => {
+  try {
+    for (const a of accounts.list()) await gv.closeAccount(a.id).catch(() => {});
+    const buf = sessionBundle.buildAll();
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="gv-sessions-all.zip"`);
+    res.send(buf);
+    log(`Exported all sessions (${(buf.length / 1048576).toFixed(1)} MB).`);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Upload a bundle (raw zip body) -> restore account(s) + profile(s) on this host.
+app.post(
+  "/api/session/import",
+  requireAuth,
+  express.raw({ type: "*/*", limit: "500mb" }),
+  async (req, res) => {
+    try {
+      const { restored, count } = sessionBundle.importBundle(req.body);
+      const names = restored.map((r) => r.label).join(", ");
+      log(`Imported ${count} session(s): ${names}. Ready to call.`);
+      broadcast({ type: "accounts", accounts: accounts.list(), activeId: accounts.getActiveId() });
+      await handlers.status();
+      res.json({ ok: true, count, restored });
+    } catch (err) {
+      log(`Session import failed: ${err.message}`);
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  }
+);
 
 // Serve the built dashboard (single-service hosting). The shell loads openly so
-// it can present the login screen; the control plane (WS, /vnc) stays gated.
+// it can present the login screen; the control plane (WS, API) stays gated.
 if (fs.existsSync(config.distDir)) {
   app.use(express.static(config.distDir));
   app.get("*", (req, res, next) => {
@@ -80,7 +125,6 @@ if (fs.existsSync(config.distDir)) {
     if (
       p.startsWith("/control") ||
       p.startsWith("/audio") ||
-      p.startsWith("/vnc") ||
       p.startsWith("/api") ||
       p === "/auth" ||
       p === "/health"
@@ -291,6 +335,7 @@ const handlers = {
       loggedIn: activeLoggedIn,
       stt: Boolean(config.openaiApiKey),
       headless: gv.isHeadless(),
+      hosted: Boolean(config.hosted),
       proxyEnabled: Boolean(config.proxy && config.proxy.enabled),
       telegram: telegramConfigured(),
       telegramChatId: maskChatId(config.telegram.chatId),
@@ -311,6 +356,11 @@ const handlers = {
   async addAccount({ label, phoneNumber, note }) {
     const acct = accounts.add({ label, phoneNumber, note });
     const loc = acct.proxy ? ` Assigned ${acct.proxy.city}, ${acct.proxy.region} (residential IP).` : "";
+    if (config.hosted) {
+      log(`Added account "${acct.label}".${loc} Login is local-only — log in on a local backend, then Import the session here.`);
+      await handlers.status();
+      return;
+    }
     log(`Added account "${acct.label}".${loc} Opening Chromium window on your desktop...`);
     await handlers.status();
     try {
@@ -411,6 +461,9 @@ const handlers = {
   },
 
   async loginAccount({ id }) {
+    if (config.hosted) {
+      return log("Login is local-only on the hosted server. Log in on a local backend, then upload the session (Import) here.");
+    }
     const targetId = id || gv.activeAccountId() || accounts.getActiveId();
     if (!targetId) return log("No account selected.");
     log("Opening Chromium window on your desktop...");
@@ -437,6 +490,9 @@ const handlers = {
   },
 
   async showBrowser({ id } = {}) {
+    if (config.hosted) {
+      return log("Opening a browser window isn't available on the hosted server (calls run headless). Use a local backend to log in.");
+    }
     try {
       const r = await gv.showBrowser(id);
       log(`Opened browser at ${r.url}`);
@@ -1251,11 +1307,6 @@ audioWss.on("connection", (ws) => {
 
 server.on("upgrade", (req, socket, head) => {
   const { url } = req;
-  // noVNC websocket is reverse-proxied (its own path under /vnc).
-  if (url.startsWith("/vnc")) {
-    if (!requestAuthorized(req)) return socket.destroy();
-    return vncProxy.upgrade(req, socket, head);
-  }
   if (!requestAuthorized(req)) return socket.destroy();
   if (url.startsWith("/control")) {
     controlWss.handleUpgrade(req, socket, head, (ws) => controlWss.emit("connection", ws, req));
@@ -1271,7 +1322,8 @@ server.listen(config.port, config.host, async () => {
   const pst = proxyStatus();
   console.log(`call-backend listening on http://${config.host}:${config.port}`);
   console.log(`  dashboard: ${fs.existsSync(config.distDir) ? "served at /" : "not bundled (dev: run the Vite UI)"}`);
-  console.log(`  control WS: /control   audio WS: /audio   remote login: /vnc`);
+  console.log(`  control WS: /control   audio WS: /audio`);
+  console.log(`  mode: ${config.hosted ? "HOSTED (login local-only; import sessions)" : "LOCAL (headed login + export)"}`);
   console.log(`  auth: ${authEnabled() ? "ON (DASHBOARD_PASSWORD set)" : "OFF (no DASHBOARD_PASSWORD)"}`);
   console.log(`  proxy: ${pst.ok ? `ON (${proxyMode()})` : `OFF — ${pst.reason}`}`);
 

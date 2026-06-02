@@ -1,7 +1,7 @@
 // Shared-password gate for the hosted dashboard. When config.dashboardPassword
 // is empty (local dev) auth is disabled and everything is allowed. When set,
 // the client posts the password to /auth and receives an httpOnly cookie; the
-// cookie is then required on HTTP routes, the WS upgrades, and the /vnc proxy.
+// cookie is then required on the gated HTTP API routes and the WS upgrades.
 
 import crypto from "node:crypto";
 import { config } from "./config.js";

@@ -82,8 +82,13 @@ export const config = {
   dashboardPassword: process.env.DASHBOARD_PASSWORD || "",
   // Built dashboard served by the backend (single-service hosting).
   distDir: path.join(HERE, "public"),
-  // Local noVNC/websockify endpoint the backend reverse-proxies under /vnc.
-  vncProxyTarget: process.env.VNC_PROXY_TARGET || "http://127.0.0.1:6080",
+  // True when running on the live server (Railway). Google login is local-only;
+  // on a hosted backend the dashboard shows "Import session" (upload) instead of
+  // the headed login flow. Set HOSTED=true (the Dockerfile does); also inferred
+  // from Railway's injected env when HOSTED is unset.
+  hosted:
+    String(process.env.HOSTED ?? (process.env.RAILWAY_ENVIRONMENT ? "true" : "false"))
+      .toLowerCase() === "true",
 
   // Base folder holding one persistent Chromium profile per saved Google account
   // (cookies/state live here). Keep this out of git / on a volume when hosted.
