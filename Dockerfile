@@ -11,7 +11,10 @@ COPY outbound-ui/ ./
 RUN npm run build
 
 # ---- Stage 2: runtime (Playwright image already has Chromium + deps) ------ #
-FROM mcr.microsoft.com/playwright:v1.47.0-jammy AS runtime
+# IMPORTANT: this image tag MUST match the "playwright" version in
+# call-backend/package.json (the image ships the exact Chromium revision that
+# npm playwright expects). Bump both together or Chromium won't be found.
+FROM mcr.microsoft.com/playwright:v1.60.0-jammy AS runtime
 
 # Calls run headless on the server (you log in to Google locally and upload the
 # saved session), so no virtual display / VNC stack is needed - only tini to
