@@ -18,6 +18,7 @@ function controlUrl() {
   return `${protocol === "https:" ? "wss" : "ws"}://${host}/control`;
 }
 const CONTROL_URL = controlUrl();
+const HTTP_BASE = httpBase();
 
 // React hook: connects to the local call-backend control WebSocket, exposes the
 // live per-session status/transcript, campaign progress, lead outcomes, logs,
@@ -27,6 +28,9 @@ export function useBackend() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [sttEnabled, setSttEnabled] = useState(false);
   const [headless, setHeadless] = useState(false);
+  // True when the backend runs on the live server (login is local-only; the
+  // Accounts tab shows "Import session" instead of the headed login flow).
+  const [hosted, setHosted] = useState(false);
   const [proxyEnabled, setProxyEnabled] = useState(false);
   const [accounts, setAccounts] = useState([]);
   const [activeId, setActiveId] = useState(null);
@@ -111,6 +115,7 @@ export function useBackend() {
           if (typeof msg.loggedIn === "boolean") setLoggedIn(msg.loggedIn);
           if (typeof msg.stt === "boolean") setSttEnabled(msg.stt);
           if (typeof msg.headless === "boolean") setHeadless(msg.headless);
+          if (typeof msg.hosted === "boolean") setHosted(msg.hosted);
           if (typeof msg.proxyEnabled === "boolean") setProxyEnabled(msg.proxyEnabled);
           if (Array.isArray(msg.accounts)) setAccounts(msg.accounts);
           if ("activeId" in msg) setActiveId(msg.activeId);
@@ -320,6 +325,8 @@ export function useBackend() {
     loggedIn,
     sttEnabled,
     headless,
+    hosted,
+    httpBase: HTTP_BASE,
     proxyEnabled,
     accounts,
     activeId,

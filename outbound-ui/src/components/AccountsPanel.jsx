@@ -80,7 +80,7 @@ function AddAccountModal({ onAdd, onClose }) {
   return (
     <Modal
       title="Add Google account"
-      subtitle="Creates the account, then opens the cloud browser in a Remote browser window so you can finish Google login. The session is saved and assigned a sticky residential IP."
+      subtitle="Creates the account, assigns a sticky residential IP, then opens a Chromium window on this machine so you can finish Google login. The session is saved and can be exported to the live server."
       onClose={onClose}
     >
       <form onSubmit={submit}>
@@ -107,13 +107,20 @@ function AddAccountModal({ onAdd, onClose }) {
 
 // Connect / manage Google accounts as selectable cards. Each account is
 // assigned a sticky residential proxy (state/city), shown on its card.
+//
+// LOCAL backend: log in (headed Chromium) here, then Export a session to a .zip.
+// HOSTED backend: login is unavailable (calls run headless) - Import the .zip
+// you exported locally to bring the logged-in session to the server.
 export default function AccountsPanel({ be }) {
+  const hosted = be.hosted;
   const [newestId, setNewestId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [adding, setAdding] = useState(false);
   const [selectedId, setSelectedId] = useState(null); // pure UI highlight, no backend effect
   const [busy, setBusy] = useState({}); // id -> transient label ("Checking...", etc.)
-  const [vncOpen, setVncOpen] = useState(false); // remote-browser (noVNC) viewer modal
+  const [importMsg, setImportMsg] = useState("");
+  const [importing, setImporting] = useState(false);
+  const fileRef = useRef(null);
   const prevIds = useRef(new Set(be.accounts.map((a) => a.id)));
 
   // Marks a card busy, sends the command, and auto-clears after a safety window.
@@ -125,11 +132,42 @@ export default function AccountsPanel({ be }) {
     }, 8000);
   }
 
-  // Opens the cloud browser for an account AND the noVNC viewer so the Google
-  // login / Voice window can be seen and driven remotely (no local desktop).
-  function openRemote(id, type, label) {
-    runBusy(id, label, type);
-    setVncOpen(true);
+  // Trigger a browser download of a session export (auth cookie rides along on
+  // the same-origin GET).
+  function download(url) {
+    const a = document.createElement("a");
+    a.href = url;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  const exportSession = (id) => download(`${be.httpBase}/api/session/${id}/export`);
+  const exportAll = () => download(`${be.httpBase}/api/session/export-all`);
+
+  // Upload a .zip session bundle to this (hosted) backend.
+  async function importSession(file) {
+    if (!file) return;
+    setImporting(true);
+    setImportMsg(`Uploading ${file.name}…`);
+    try {
+      const r = await fetch(`${be.httpBase}/api/session/import`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: file,
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      const names = (j.restored || []).map((x) => x.label).join(", ");
+      setImportMsg(`Imported ${j.count} session(s)${names ? `: ${names}` : ""}.`);
+      be.send("status");
+    } catch (e) {
+      setImportMsg(`Import failed: ${e.message}`);
+    } finally {
+      setImporting(false);
+      if (fileRef.current) fileRef.current.value = "";
+      setTimeout(() => setImportMsg(""), 8000);
+    }
   }
 
   // Clear the "Checking..." badge as soon as that account's IP result arrives.
@@ -162,14 +200,39 @@ export default function AccountsPanel({ be }) {
 
   return (
     <div className="accounts-tab">
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".zip,application/zip,application/octet-stream"
+        style={{ display: "none" }}
+        onChange={(e) => importSession(e.target.files && e.target.files[0])}
+      />
+
       <div className="page-head">
         <div>
           <h2>Accounts</h2>
-          <p>Connect Google accounts and manage their residential IPs. Use a card's Log in / Open browser to drive its cloud Chromium in the Remote browser window (sign in to Google there).</p>
+          <p>
+            {hosted
+              ? "This is the live server — calls run headless and Google login isn't available here. Log in on a local backend, Export the session, then Import the .zip below."
+              : "Connect Google accounts and manage their residential IPs. Log in with a card's Log in button (a Chromium window opens here), then Export the saved session to move it to the live server."}
+          </p>
         </div>
-        <button className="btn" onClick={() => setAdding(true)}>
-          <IconPlus size={15} /> Add Google account
-        </button>
+        {hosted ? (
+          <button className="btn" disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}>
+            <IconPlus size={15} /> {importing ? "Importing…" : "Import session"}
+          </button>
+        ) : (
+          <div style={{ display: "flex", gap: 8 }}>
+            {be.accounts.length > 0 && (
+              <button className="btn btn-ghost" onClick={exportAll} title="Download every saved session as one .zip">
+                Export all
+              </button>
+            )}
+            <button className="btn" onClick={() => setAdding(true)}>
+              <IconPlus size={15} /> Add Google account
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Control bar */}
@@ -181,6 +244,12 @@ export default function AccountsPanel({ be }) {
             {be.proxyEnabled ? "Proxy ON" : "Proxy OFF — check .env"}
           </span>
         )}
+        {be.connected && (
+          <span className="ca-proxy" title={hosted ? "Live server" : "Local machine"}>
+            {hosted ? "Hosted" : "Local"}
+          </span>
+        )}
+        {importMsg && <span className="ca-cb-conn" style={{ marginLeft: 10 }}>{importMsg}</span>}
         <span className="ca-spacer" />
         <button className="btn btn-ghost" onClick={() => be.send("status")}>Refresh</button>
       </div>
@@ -259,20 +328,33 @@ export default function AccountsPanel({ be }) {
                 >
                   {busy[a.id] === "Rotating..." ? "Rotating..." : "Rotate IP"}
                 </button>
-                <button
-                  className="btn btn-sm btn-ghost"
-                  disabled={busy[a.id] === "Opening browser..."}
-                  onClick={() => openRemote(a.id, "showBrowser", "Opening browser...")}
-                >
-                  {busy[a.id] === "Opening browser..." ? "Opening..." : "Open browser"}
-                </button>
-                <button
-                  className="btn btn-sm btn-ghost"
-                  disabled={busy[a.id] === "Opening login..."}
-                  onClick={() => openRemote(a.id, "loginAccount", "Opening login...")}
-                >
-                  {busy[a.id] === "Opening login..." ? "Opening..." : "Log in"}
-                </button>
+
+                {!hosted && (
+                  <>
+                    <button
+                      className="btn btn-sm btn-ghost"
+                      disabled={busy[a.id] === "Opening browser..."}
+                      onClick={() => runBusy(a.id, "Opening browser...", "showBrowser")}
+                    >
+                      {busy[a.id] === "Opening browser..." ? "Opening..." : "Open browser"}
+                    </button>
+                    <button
+                      className="btn btn-sm btn-ghost"
+                      disabled={busy[a.id] === "Opening login..."}
+                      onClick={() => runBusy(a.id, "Opening login...", "loginAccount")}
+                    >
+                      {busy[a.id] === "Opening login..." ? "Opening..." : "Log in"}
+                    </button>
+                    <button
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => exportSession(a.id)}
+                      title="Download this logged-in session as a .zip to upload on the live server"
+                    >
+                      Export session
+                    </button>
+                  </>
+                )}
+
                 <button className="btn btn-sm btn-ghost" onClick={() => be.send("removeAccount", { id: a.id })}>
                   Remove
                 </button>
@@ -285,10 +367,17 @@ export default function AccountsPanel({ be }) {
           );
         })}
 
-        <button className="add-card" onClick={() => setAdding(true)}>
-          <IconPlus size={20} />
-          Add Google account
-        </button>
+        {hosted ? (
+          <button className="add-card" disabled={importing} onClick={() => fileRef.current && fileRef.current.click()}>
+            <IconPlus size={20} />
+            {importing ? "Importing…" : "Import session (.zip)"}
+          </button>
+        ) : (
+          <button className="add-card" onClick={() => setAdding(true)}>
+            <IconPlus size={20} />
+            Add Google account
+          </button>
+        )}
       </div>
 
       <section className="card" style={{ marginTop: 16 }}>
@@ -314,26 +403,9 @@ export default function AccountsPanel({ be }) {
 
       {adding && (
         <AddAccountModal
-          onAdd={(payload) => {
-            be.send("addAccount", payload);
-            setVncOpen(true); // backend opens the cloud browser for Google login
-          }}
+          onAdd={(payload) => be.send("addAccount", payload)}
           onClose={() => setAdding(false)}
         />
-      )}
-
-      {vncOpen && (
-        <Modal
-          title="Remote browser"
-          subtitle="This is the cloud Chromium. Complete the Google sign-in here; the session is saved and reused for calls."
-          onClose={() => setVncOpen(false)}
-        >
-          <iframe
-            className="vnc-frame"
-            title="Remote browser"
-            src="/vnc/vnc.html?path=vnc/websockify&autoconnect=true&resize=remote&reconnect=true"
-          />
-        </Modal>
       )}
     </div>
   );
